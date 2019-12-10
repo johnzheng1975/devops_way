@@ -1,0 +1,111 @@
+# Cassandra Cluster Setup
+## Precondition
+ - Create three EC2 with ubuntu 16.04 
+ -- 172.31.83.189  (*as seed*)
+ -- 172.31.95.138
+ -- 172.31.86.35
+ - Bind security group, to make them can access each other
+## Setup Single Node Cassandra
+```
+# Java install, prefer 1.8
+sudo apt-get update
+sudo apt-get install default-jre
+java -version
+
+# Cassandra install
+echo "deb http://www.apache.org/dist/cassandra/debian 311x main" | sudo tee -a /etc/apt/sources.list.d/cassandra.sources.list
+curl https://www.apache.org/dist/cassandra/KEYS | sudo apt-key add -
+sudo apt-get update
+sudo apt-get install cassandra
+
+# Test
+cqlsh
+nodetool status
+```
+Refer to:
+- [https://cassandra.apache.org/download/](https://cassandra.apache.org/download/)
+- [https://askubuntu.com/questions/790671/oracle-java8-installer-no-installation-candidate](https://askubuntu.com/questions/790671/oracle-java8-installer-no-installation-candidate)
+## Setup Cassandra Cluster
+Change three node one by one
+### Step 1 — Deleting Default Data
+```
+sudo service cassandra stop
+sudo rm -rf /var/lib/cassandra/data/system/*
+```
+### Step 2 — Configuring the Cluster
+Change /etc/cassandra/cassandra.yaml as below:
+-   `-seeds`: A comma-delimited list of the IP address of seeds.  (i.e. **172.31.83.189**)
+-   `listen_address`: The private IP address of this node. (i.e. **172.31.86.35**)
+-   `rpc_address`Set to **127.0.0.1**
+-   `endpoint_snitch`: Prefer use **GossipingPropertyFileSnitch**.
+-   `auto_bootstrap`:  Add **auto_bootstrap: false**
+### Step 3 — Start cluster
+```
+sudo service cassandra start  
+sudo service cassandra status #Make sure it is "active (running)"
+```
+`Note`: Start the seed node firstly
+### Step 4 — Check the Cluster Status
+#### Checkpoint 1: Whether cluster has three nodes
+```
+ubuntu@ip-172-31-83-189:~$ nodetool status
+Datacenter: DC1
+===============
+Status=Up/Down
+|/ State=Normal/Leaving/Joining/Moving
+--  Address        Load       Tokens       Owns (effective)  Host ID                               Rack
+UN  172.31.83.189  299.6 KiB  256          32.6%             5e5a740d-4dac-4dbd-b3ea-bb2ea1622bca  RAC1
+Datacenter: dc1
+===============
+Status=Up/Down
+|/ State=Normal/Leaving/Joining/Moving
+--  Address        Load       Tokens       Owns (effective)  Host ID                               Rack
+UN  172.31.95.138  262.98 KiB  256          31.1%             c0d44613-d447-48e4-8d18-f5f3cae8006e  rack1
+UN  172.31.86.35   197.89 KiB  256          36.3%             26b92c23-914d-4484-810c-87d4d175366d  rack1
+```
+#### Checkpoint 2: whether the data can be synced inside cluster
+In seed node, run below
+```
+ubuntu@ip-172-31-83-189:~$ cqlsh
+Connected to Test Cluster at 127.0.0.1:9042.
+[cqlsh 5.0.1 | Cassandra 3.11.5 | CQL spec 3.4.4 | Native protocol v4]
+Use HELP for help.
+cqlsh> CREATE KEYSPACE mykeyspace
+   ...   WITH REPLICATION = { 
+   ...    'class' : 'SimpleStrategy', 
+   ...    'replication_factor' : 1 
+   ...   };
+cqlsh> CREATE TABLE mykeyspace.cyclist_name ( 
+   ...    id UUID PRIMARY KEY, 
+   ...    lastname text, 
+   ...    firstname text );
+cqlsh> INSERT INTO mykeyspace.cyclist_name (id, lastname, firstname)
+   ...   VALUES (6ab09bec-e68e-48d9-a5f8-97e6fb4c9b47, 'KRUIKSWIJK','Steven')
+   ...   USING TTL 86400 AND TIMESTAMP 123456789;
+cqlsh> select * from mykeyspace.cyclist_name;
+
+ id                                   | firstname | lastname
+--------------------------------------+-----------+------------
+ 6ab09bec-e68e-48d9-a5f8-97e6fb4c9b47 |    Steven | KRUIKSWIJK
+
+(1 rows)
+```
+In  other nodes, should show the same query result
+```
+ubuntu@ip-172-31-86-35:~$ cqlsh
+Connected to Test Cluster at 127.0.0.1:9042.
+[cqlsh 5.0.1 | Cassandra 3.11.5 | CQL spec 3.4.4 | Native protocol v4]
+Use HELP for help.
+cqlsh> select * from mykeyspace.cyclist_name;
+
+ id                                   | firstname | lastname
+--------------------------------------+-----------+------------
+ 6ab09bec-e68e-48d9-a5f8-97e6fb4c9b47 |    Steven | KRUIKSWIJK
+
+(1 rows)
+```
+**Refer to**
+[https://www.digitalocean.com/community/tutorials/how-to-run-a-multi-node-cluster-database-with-cassandra-on-ubuntu-14-04](https://www.digitalocean.com/community/tutorials/how-to-run-a-multi-node-cluster-database-with-cassandra-on-ubuntu-14-04)
+[https://www.bmc.com/blogs/setup-cassandra-cluster/](https://www.bmc.com/blogs/setup-cassandra-cluster/)
+## Suggestions or Questions
+- Please mail to john.zheng@hp.com
